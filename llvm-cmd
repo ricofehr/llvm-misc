@@ -1,0 +1,120 @@
+#!/bin/bash
+
+LLVMVERSION="3.8"
+
+# display help
+cmdhelp() {
+    cat <<EOF
+Usage: $0 [cmd] [cmdoptions]
+Where [cmd] is into
+ toir: convert source file to llvm IR
+ toas: convert bitecode file to llvm IR
+ tobc: convert llvm IR file to bitecode file
+ lli: execute directly bitecode file
+ llc: convert bitecode to assembly language
+ ccmodule: compile c++ llvm module
+EOF
+}
+
+# create uniform path for llvm local install if needed
+# for instance on ubuntu, we have all "llvm" binaries and folders ended by -X.Y version number
+# We want remove this version number on paths for using same code on different linux system
+uniform_llvm() {
+    pushd /usr/bin >/dev/null
+    # llvm binaries
+    ls llvm-* | while read LLVMBIN; do
+        SUF="${LLVMBIN##*-}"
+        DESTFILE="${LLVMBIN%-*}"
+        if [[ $SUF =~ ^[0-9]+\.[0-9]+$ ]]; then
+            if [[ ! -e ${DESTFILE} ]]; then
+                echo "ln -sf $LLVMBIN $DESTFILE"
+                sudo ln -sf $LLVMBIN $DESTFILE 
+            fi
+        fi
+    done
+
+    # llc binaries
+    ls llc-* | while read LLVMBIN; do
+        SUF="${LLVMBIN##*-}"
+        DESTFILE="${LLVMBIN%-*}"
+        if [[ $SUF =~ ^[0-9]+\.[0-9]+$ ]]; then
+            if [[ ! -e ${DESTFILE} ]]; then
+                echo "ln -sf $LLVMBIN $DESTFILE"
+                sudo ln -sf $LLVMBIN $DESTFILE
+            fi
+        fi
+    done
+    # lli binaries
+    ls lli-* | while read LLVMBIN; do
+        SUF="${LLVMBIN##*-}"
+        DESTFILE="${LLVMBIN%-*}"
+        if [[ $SUF =~ ^[0-9]+\.[0-9]+$ ]]; then
+            if [[ ! -e ${DESTFILE} ]]; then
+                echo "ln -sf $LLVMBIN $DESTFILE"
+                sudo ln -sf $LLVMBIN $DESTFILE
+            fi
+        fi
+    done
+    popd >/dev/null
+
+    pushd /usr/include >/dev/null
+    # C include folders
+    find . -maxdepth 1 -type d -regex '^./llvm-.*$' | sed -s "s;^./;;" | while read LLVMFOLDER; do
+        SUF="${LLVMFOLDER##*-}"
+        DESTFILE="${LLVMFOLDER%-*}"
+        if [[ $SUF =~ ^[0-9]+\.[0-9]+$ ]]; then
+            if [[ ! -e ${DESTFILE} ]]; then
+                echo "ln -sf $LLVMFOLDER $DESTFILE"
+                sudo ln -sf $LLVMFOLDER $DESTFILE
+            fi
+        fi
+    done
+    popd >/dev/null
+}
+
+# TODO: Prerequisites, check if clang and llvm binaries are installed
+
+# uniform llvm binaries paths
+uniform_llvm
+
+case "$1" in
+    toir)
+        shift
+        # convert source file to Intermediate LLVM IR
+        clang -emit-llvm -c -S "$1"
+        cat ${1%%.*}.ll
+        ;;
+    tobc)
+        shift
+        # convert IR file to bytecode
+        llvm-as $1 -o ${1%%.*}.bc
+        hexdump -c ${1%%.*}.bc
+        ;;
+    tobc-aio)
+        shift
+        # merge multiple bytecode files into one
+        llvm-link $@ -o allinone.bc
+        hexdump -c allinone.bc
+        ;;
+    lli)
+        shift
+        # execute "on the fly" bitecode code
+        lli $1
+        ;;
+    llc)
+        shift
+        # compile llvm inputs (as form / bitcode form) into assembly language
+        llc $1 -o ${1%%.*}.s
+        cat ${1%%.*}.s
+        ;;
+    ccmodule)
+        shift
+        # compime llvm module
+        clang++ -O3 $1 $(llvm-config --cxxflags --ldflags --system-libs --libs core) -o ${1%%.*}
+        ./${1%%.*}
+        ;;
+    *)
+        shift
+        cmdhelp
+        ;;
+esac
